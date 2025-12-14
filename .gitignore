@@ -10,6 +10,7 @@ __pycache__/
 # ===== Data (DO NOT COMMIT) =====
 data/
 !data/.gitkeep
+!src/data/
 
 # ===== Experiment outputs =====
 runs/
