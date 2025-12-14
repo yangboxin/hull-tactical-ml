@@ -1,5 +1,6 @@
 # training entrypoint
 import yaml
+import argparse
 import numpy as np
 from pathlib import Path
 from sklearn.metrics import mean_squared_error
@@ -9,21 +10,39 @@ from src.data.load import load_csv_time_sorted
 from src.models.baseline.linear import make_model
 from src.data.split import walk_forward_splits
 from src.features.build import build_features
+from src.models.ensemble.xgb import make_xgb_model
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to experiment config yaml",
+    )
+    return parser.parse_args()
 
 
 def main():
-    # 1. read configs  
-    config_path = Path("configs/baseline_ridge.yaml")
+    args = parse_args()
+
+    # read configs
+    config_path = Path(args.config)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config not found: {config_path}")
+
     cfg = yaml.safe_load(config_path.read_text())
 
+    # read run-level params
     time_col = cfg["run"]["time_col"]
     target_col = cfg["run"]["target_col"]
 
-    # 2. read data  
+    # read data
     df = load_csv_time_sorted(
         cfg["data"]["raw_path"],
         time_col=time_col,
     )
+
 
     # drop cols
     for c in cfg["data"].get("drop_cols", []):
@@ -33,9 +52,13 @@ def main():
     # build features
     df = build_features(df, cfg)
 
-    # 3. construct X / y
+    # construct X / y
     y = df[target_col].values
-    X = df.drop(columns=[target_col, time_col])
+    drop_cols = set([target_col, time_col])
+    drop_cols |= set(cfg.get("features", {}).get("drop_columns", []))
+
+    X = df.drop(columns=list(drop_cols), errors="ignore")
+
 
     # only numeric features
     X = X.select_dtypes(include="number")
@@ -76,7 +99,15 @@ def main():
         X_test, y_test = X.iloc[test_idx], y[test_idx]
 
         # 5. preprocess  
-        if cfg["preprocess"]["scale"] == "standard":
+        preprocess_cfg = cfg.get("preprocess", {})
+        scale = preprocess_cfg.get("scale", "none")
+
+        # XGBoost / tree models generally don't need scaling
+        model_name = cfg.get("model", {}).get("name", "ridge")
+        if model_name in ("xgboost", "random_forest", "lightgbm"):
+            scale = "none"
+
+        if scale == "standard":
             scaler = StandardScaler()
             X_train_t = scaler.fit_transform(X_train)
             X_test_t = scaler.transform(X_test)
@@ -85,7 +116,16 @@ def main():
             X_test_t = X_test.values
 
         # 6. train model  
-        model = make_model(**cfg["model"]["params"])
+        model_name = cfg["model"]["name"]
+        model_params = cfg["model"].get("params", {})
+
+        if model_name == "ridge":
+            model = make_model(**model_params)
+        elif model_name == "xgboost":
+            model = make_xgb_model(model_params)
+        else:
+            raise ValueError(f"Unknown model name: {model_name}")
+
         model.fit(X_train_t, y_train)
 
         # 7. eval  

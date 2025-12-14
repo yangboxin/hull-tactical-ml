@@ -31,7 +31,7 @@ preprocess:
   impute: none            
 
 model:
-  type: ridge
+  name: ridge
   params:
     alpha: 1.0
 
