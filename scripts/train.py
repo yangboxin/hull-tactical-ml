@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src.data.load import load_csv_time_sorted
 from src.models.baseline.linear import make_model
+from src.data.split import walk_forward_splits
 
 
 def main():
@@ -48,38 +49,55 @@ def main():
         X = X.loc[mask].reset_index(drop=True)
         y = y[mask.to_numpy()]
 
-    # ===== 4. time split =====
+    # ===== 4. time split & walk-forward =====
     n = len(X)
-    train_ratio = cfg["split"]["train_ratio"]
-    split = int(n * train_ratio)
 
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y[:split], y[split:]
-
-    # ===== 5. preprocess =====
-    if cfg["preprocess"]["scale"] == "standard":
-        scaler = StandardScaler()
-        X_train = scaler.fit_transform(X_train)
-        X_test = scaler.transform(X_test)
+    if cfg["split"]["method"] == "walk_forward":
+        splits = walk_forward_splits(
+            n=n,
+            n_folds=int(cfg["split"]["n_folds"]),
+            test_size=int(cfg["split"]["test_size"]),
+            min_train_size=int(cfg["split"]["min_train_size"]),
+        )
     else:
-        X_train = X_train.values
-        X_test = X_test.values
+        # fallback: simple time split
+        train_ratio = float(cfg["split"]["train_ratio"])
+        split = int(n * train_ratio)
+        splits = [(np.arange(split), np.array([], dtype=int), np.arange(split, n))]
 
-    # ===== 6. Train Model =====
-    model = make_model(**cfg["model"]["params"])
-    model.fit(X_train, y_train)
+    fold_rmses = []
 
-    # ===== 7. Evaluation =====
-    preds = model.predict(X_test)
-    rmse = np.sqrt(mean_squared_error(y_test, preds))
+    for fold_id, (train_idx, test_idx) in enumerate(splits, start=1):
+        X_train, y_train = X.iloc[train_idx], y[train_idx]
+        X_test, y_test = X.iloc[test_idx], y[test_idx]
+
+        # ===== 5. preprocess =====
+        if cfg["preprocess"]["scale"] == "standard":
+            scaler = StandardScaler()
+            X_train_t = scaler.fit_transform(X_train)
+            X_test_t = scaler.transform(X_test)
+        else:
+            X_train_t = X_train.values
+            X_test_t = X_test.values
+
+        # ===== 6. train model =====
+        model = make_model(**cfg["model"]["params"])
+        model.fit(X_train_t, y_train)
+
+        # ===== 7. eval =====
+        preds = model.predict(X_test_t)
+        rmse = np.sqrt(mean_squared_error(y_test, preds))
+        fold_rmses.append(rmse)
+
+        print(f"Fold {fold_id:02d} | Train={len(train_idx)} Test={len(test_idx)} | RMSE={rmse:.6f}")
 
     print("=" * 50)
-    print("Baseline Ridge Result")
-    print(f"Samples used      : {n}")
-    print(f"Train / Test size : {len(X_train)} / {len(X_test)}")
-    print(f"RMSE              : {rmse:.6f}")
+    print("Walk-forward Ridge Summary")
+    print(f"Samples used : {n}")
+    print(f"Folds        : {len(fold_rmses)}")
+    print(f"RMSE mean    : {np.mean(fold_rmses):.6f}")
+    print(f"RMSE std     : {np.std(fold_rmses, ddof=1):.6f}" if len(fold_rmses) > 1 else "RMSE std     : n/a")
     print("=" * 50)
-
 
 if __name__ == "__main__":
     main()

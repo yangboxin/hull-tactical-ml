@@ -12,8 +12,10 @@ data:
     - risk_free_rate
 
 split:
-  method: simple_time     
-  train_ratio: 0.7
+  method: walk_forward
+  n_folds: 5
+  test_size: 1447        
+  min_train_size: 1500 
 
 features:
   use_numeric_only: true
