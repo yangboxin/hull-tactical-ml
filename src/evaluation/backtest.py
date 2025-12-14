@@ -93,3 +93,21 @@ def backtest_summary(
         "std_return": float(np.std(strat_r, ddof=1)) if len(strat_r) > 1 else 0.0,
         "n_days": int(len(strat_r)),
     }
+
+def buy_and_hold_summary(
+    y_true_returns: np.ndarray,
+    risk_free: float = 0.0,
+) -> dict:
+    """
+    Buy-and-hold baseline: always long the market.
+    """
+    r = np.asarray(y_true_returns).reshape(-1)
+
+    return {
+        "sharpe": sharpe_ratio(r, risk_free=risk_free),
+        "sortino": sortino_ratio(r, risk_free=risk_free),
+        "max_drawdown": max_drawdown(r, use_log=False),
+        "mean_return": float(np.mean(r)) if len(r) else 0.0,
+        "std_return": float(np.std(r, ddof=1)) if len(r) > 1 else 0.0,
+        "n_days": int(len(r)),
+    }
