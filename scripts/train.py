@@ -9,6 +9,8 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from src.interpretability.shap_analysis import compute_shap
+
 from src.data.sequence import make_sequences
 from src.models.sequential.lstm import LSTMRegressor
 
@@ -123,12 +125,16 @@ def main():
         train_ratio = float(cfg["split"]["train_ratio"])
         split = int(n * train_ratio)
         splits = [(np.arange(split), np.array([], dtype=int), np.arange(split, n))]
+        
+    shap_out_dir = os.path.join(os.getcwd(), "src", "interpretability", "shap_outputs") 
+    os.makedirs(shap_out_dir, exist_ok=True)
 
     fold_rmses = []
 
     fold_metrics = []   # NEW: store dict per fold (rmse/mae/diracc/sharpe/maxdd/...)
 
     for fold_id, (train_idx, test_idx) in enumerate(splits, start=1):
+        is_last_fold = (fold_id == len(splits))
         X_train, y_train = X.iloc[train_idx], y[train_idx]
         X_test, y_test = X.iloc[test_idx], y[test_idx]
 
@@ -244,6 +250,20 @@ def main():
             # inverse transform back to original y scale
             y_pred = y_scaler.inverse_transform(preds_scaled).ravel()
             y_true = y_scaler.inverse_transform(yte_seq.reshape(-1, 1)).ravel()
+            # ---------- SHAP (LSTM) ----------
+            if is_last_fold:   
+                feature_names = list(X.columns)
+                compute_shap(
+                    model=model_t,          # IMPORTANT: torch model
+                    X_train=Xtr_seq,        # numpy [N,T,F]
+                    X_test=Xte_seq,
+                    feature_names=feature_names,
+                    model_type="deep",
+                    device=str(device),
+                    out_dir=shap_out_dir,
+                    prefix=f"lstm_fold{fold_id:02d}_"
+                )
+                print(f">>> SHAP saved: lstm fold {fold_id:02d} -> {shap_out_dir}")
 
         elif model_name == "transformer":
             did_manual_training = True
@@ -331,6 +351,20 @@ def main():
 
             y_pred = y_scaler.inverse_transform(preds_scaled).ravel()
             y_true = y_scaler.inverse_transform(yte_seq.reshape(-1, 1)).ravel()
+            # ---------- SHAP (Transformer) ----------
+            if is_last_fold:   
+                feature_names = list(X.columns)
+                compute_shap(
+                    model=model_t,          # IMPORTANT: torch model
+                    X_train=Xtr_seq,        # numpy [N,T,F]
+                    X_test=Xte_seq,
+                    feature_names=feature_names,
+                    model_type="deep",
+                    device=str(device),
+                    out_dir=shap_out_dir,
+                    prefix=f"transformer_fold{fold_id:02d}_"
+                )
+                print(f">>> SHAP saved: transformer fold {fold_id:02d} -> {shap_out_dir}")
 
         else:
             raise ValueError(f"Unknown model name: {model_name}")
@@ -341,6 +375,20 @@ def main():
             preds = model.predict(X_test_t)
             y_true = y_test
             y_pred = preds
+            # ---------- SHAP (Ridge / XGBoost) ----------
+            if is_last_fold:   
+                feature_names = list(X_train.columns)
+                compute_shap(
+                    model=model,
+                    X_train=X_train,     # DataFrame to keep names
+                    X_test=X_test,
+                    feature_names=feature_names,
+                    model_type="auto",
+                    device="cpu",
+                    out_dir=shap_out_dir,
+                    prefix=f"{model_name}_fold{fold_id:02d}_"
+                )
+                print(f">>> SHAP saved: {model_name} fold {fold_id:02d} -> {shap_out_dir}")
 
         # -------- save predictions for dashboard --------
         dates = df.loc[test_idx, time_col].iloc[-len(y_true):].astype(int).to_numpy()
