@@ -11,7 +11,7 @@ __pycache__/
 data/
 !data/.gitkeep
 !src/data/
-
+src/interpretability/shap_outputs/
 # ===== Experiment outputs =====
 runs/
 artifacts/
