@@ -1,0 +1,48 @@
+run:
+  time_col: date_id
+  target_col: market_forward_excess_returns
+  seed: 42
+  tag: 126d
+
+data:
+  raw_path: data/raw/train.csv
+
+features:
+  drop_columns:
+    - forward_returns
+    - risk_free_rate
+    - market_forward_excess_returns
+  lags: [1, 5]
+  rolling_windows: []
+  max_missing_ratio: 0.2
+  drop_na_rows: true
+
+split:
+  method: walk_forward
+  n_folds: 12
+  test_size: 126       
+  min_train_size: 2520  
+
+preprocess:
+  scale: standard
+
+model:
+  name: transformer
+  params:
+    seq_len: 10
+    d_model: 64
+    nhead: 4
+    num_layers: 2
+    dim_feedforward: 128
+    dropout: 0.1
+    pooling: last
+    lr: 0.001
+    weight_decay: 0.0001
+    batch_size: 64
+    epochs: 20
+    grad_clip: 1.0
+    device: auto
+
+backtest:
+  threshold: 0.002
+  cost_per_trade: 0.0001

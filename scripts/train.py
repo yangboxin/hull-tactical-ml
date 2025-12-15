@@ -1,6 +1,7 @@
 # training entrypoint
 import yaml
 import argparse
+import pandas as pd
 import numpy as np
 from pathlib import Path
 from sklearn.metrics import mean_squared_error
@@ -22,6 +23,9 @@ from src.evaluation.backtest import backtest_summary
 from src.evaluation.backtest import buy_and_hold_summary
 
 
+all_preds = []   # NEW: collect per-fold predictions
+
+
 import random
 import os
 
@@ -36,22 +40,6 @@ def set_seed(seed=42):
 
 def _ensure_1d(a):
     return np.asarray(a).reshape(-1)
-
-def evaluate_all(y_true, y_pred, fold_id, train_n, test_n):
-    y_true = _ensure_1d(y_true)
-    y_pred = _ensure_1d(y_pred)
-
-    reg = regression_metrics(y_true, y_pred)
-    direc = directional_metrics(y_true, y_pred)
-    bt = backtest_summary(y_true, y_pred, risk_free=0.0, threshold=0.0)
-
-    print(
-        f"Fold {fold_id:02d} | Train={train_n} Test={test_n} | "
-        f"RMSE={reg['rmse']:.6f} | MAE={reg['mae']:.6f} | "
-        f"DirAcc={direc['directional_accuracy']:.3f} | F1={direc['f1']:.3f} | "
-        f"Sharpe={bt['sharpe']:.3f} | MaxDD={bt['max_drawdown']:.3f}"
-    )
-    return {**reg, **direc, **bt}
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -73,7 +61,9 @@ def main():
         raise FileNotFoundError(f"Config not found: {config_path}")
 
     cfg = yaml.safe_load(config_path.read_text())
-
+    tag = str(cfg.get("run", {}).get("tag", "")).strip()
+    if tag:
+        tag = f"_{tag}"
     # read run-level params
     time_col = cfg["run"]["time_col"]
     target_col = cfg["run"]["target_col"]
@@ -352,10 +342,28 @@ def main():
             y_true = y_test
             y_pred = preds
 
+        # -------- save predictions for dashboard --------
+        dates = df.loc[test_idx, time_col].iloc[-len(y_true):].astype(int).to_numpy()
+
+        for d, yt, yp in zip(dates, y_true, y_pred):
+            all_preds.append({
+                "date_id": d,
+                "y_true": float(yt),
+                "y_pred": float(yp),
+                "fold": fold_id,
+                "model": model_name,
+            })
+
         # ---- unified evaluation (all models) ----
         reg = regression_metrics(y_true, y_pred)
         direc = directional_metrics(y_true, y_pred)
-        bt = backtest_summary(y_true, y_pred, risk_free=0.0, threshold=0.0)
+        bt_cfg = cfg.get("backtest", {})
+        bt = backtest_summary(
+            y_true, y_pred,
+            risk_free=0.0,
+            threshold=float(bt_cfg.get("threshold", 0.0)),
+            cost_per_trade=float(bt_cfg.get("cost_per_trade", 0.0)),
+        )
         if fold_id == 1:
             bh_baseline = buy_and_hold_summary(y_true, risk_free=0.0)
 
@@ -377,7 +385,6 @@ def main():
     print(f"Folds        : {len(rmses)}")
     print(f"RMSE mean    : {np.mean(rmses):.6f}")
     print(f"RMSE std     : {np.std(rmses, ddof=1):.6f}" if len(rmses) > 1 else "RMSE std     : n/a")
-    print("=" * 50)
     diraccs = [m["directional_accuracy"] for m in fold_metrics]
     sharpes = [m["sharpe"] for m in fold_metrics]
     maxdds  = [m["max_drawdown"] for m in fold_metrics]
@@ -387,7 +394,19 @@ def main():
     print("Buy-and-Hold Baseline (Test Window)")
     print(f"Sharpe mean  : {bh_baseline['sharpe']:.3f}")
     print(f"MaxDD mean   : {bh_baseline['max_drawdown']:.3f}")
+    # -------- export predictions --------
+    out_dir = Path("data/processed")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
+    preds_df = pd.DataFrame(all_preds).sort_values("date_id")
+
+    suffix = f"{tag}" if tag else ""
+    out_path = out_dir / f"preds_{model_name}{suffix}.csv"
+
+    preds_df.to_csv(out_path, index=False)
+
+    print(f"[Saved predictions] {out_path}")
+    print("=" * 50)
 
 if __name__ == "__main__":
     main()
