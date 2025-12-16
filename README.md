@@ -10,7 +10,7 @@ Python 3.9+ is required.
 
 Install dependencies:
 
-    pip install numpy pandas scikit-learn pyyaml torch xgboost
+    pip install -r requirements.txt
 
 Download the Kaggle dataset and place it at:
 
@@ -37,6 +37,10 @@ LSTM (Sequential Model):
 Transformer:
 
     python -m scripts.train --config configs/transformer.yaml
+
+Or run all model with one script:
+    
+    python -m scripts.run_all
 ---
 
 ## Evaluation
@@ -46,6 +50,14 @@ Transformer:
 - RMSE reported on the original return scale
 - All preprocessing is fit on training data only
 
+---
+
+## Dashboard
+
+Launch the interactive dashboard to visualize model predictions and backtest results:
+
+    streamlit run app/dashboard.py
+![dashboard screenshot](/images/dashboard.png)
 ---
 
 ## Notes
